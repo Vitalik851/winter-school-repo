@@ -80,7 +80,7 @@ The practical component of this workshop puts theory into practice.
 ```bash
 # Clone the repository
 git clone [https://github.com/your-username/winter-school-2026-rl.git](https://github.com/your-username/winter-school-2026-rl.git)
-cd winter-school-2026-rl
+cd winter-school-repo
 
 # Install dependencies
 pip install -r requirements.txt
