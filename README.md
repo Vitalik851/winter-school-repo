@@ -101,10 +101,10 @@ python games/grid_coin_collector.py
 
 ### Training the RL Agent:
 
-(missing for now)
+![Training a Taxi game on Q-Learning](image.png)
 
 ```bash
-python rl_agent/train.py
+python rl-methods/main_q-learning.py
 ```
 
 ### 📂 Repository Structure
