@@ -1,164 +1,102 @@
-import gymnasium as gym
+import sys
+import os
 import numpy as np
 import random
 import time
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-import os
-from datetime import datetime
 
-# Fix for macOS crash (zsh: trace trap)
-import matplotlib
-matplotlib.use('Agg') # Must be before importing pyplot
-import matplotlib.pyplot as plt
+# --- 1. Шлях до папки з іграми ---
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# ==========================================
-# ⚙️ CONFIGURATION
-# ==========================================
-ENV_NAME = "Taxi-v3"
-TRAIN_EPISODES = 2000
-MAX_STEPS = 100
-LEARNING_RATE = 0.7
-DISCOUNT_RATE = 0.95
-EPSILON_START = 1.0
-EPSILON_DECAY = 0.005
-EPSILON_MIN = 0.01
+# --- 2. Імпорт гри ---
+try:
+    from games.grid_coin_collector import GridWorldEnv
+except ImportError:
+    print("❌ ПОМИЛКА: Не знайдено файл 'games/grid_coin_collector.py'")
+    sys.exit()
 
-def save_plots(rewards):
-    """
-    Generates and saves a graph of the training progress.
-    """
-    plt.figure(figsize=(10, 5))
-    
-    # 1. Plot raw rewards (light blue)
-    plt.plot(rewards, color='cyan', alpha=0.3, label='Raw Reward')
-    
-    # 2. Calculate and plot Moving Average (dark blue)
-    # This smooths out the noise to show the actual learning trend
-    window_size = 50
-    if len(rewards) >= window_size:
-        moving_avg = np.convolve(rewards, np.ones(window_size)/window_size, mode='valid')
-        plt.plot(range(window_size-1, len(rewards)), moving_avg, color='blue', linewidth=2, label='Moving Avg (50 eps)')
+# --- 3. Налаштування ---
+env = GridWorldEnv(render_mode=None) 
+q_table = {}
 
-    plt.title(f"Agent Learning Progress ({ENV_NAME})")
-    plt.xlabel("Episode")
-    plt.ylabel("Total Reward")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # 1. Define the directory path
-    folder_path = "rl-methods/experiments"
-    
-    # 2. Create the directory if it doesn't exist (CRITICAL STEP)
-    os.makedirs(folder_path, exist_ok=True)
-    
-    # 3. Generate a clean timestamp (YearMonthDay_HourMinuteSecond)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # 4. Save with the new dynamic filename
-    filename = f"{folder_path}/taxi_q-learning_metrics_{timestamp}.png"
-    
-    plt.savefig(filename)
-    print(f"📊 Metrics saved to {filename}")
-    plt.close()
+# Параметри (збільшено кількість епізодів для кращого навчання)
+episodes = 3000      # Кількість спроб
+alpha = 0.1          # Швидкість навчання
+gamma = 0.99         # Важливість майбутнього
+epsilon = 1.0        # Дослідження
+epsilon_decay = 0.999 # Повільне зменшення випадковості
+epsilon_min = 0.05
 
-def watch_agent(qtable=None, delay=0.1):
-    """
-    Runs one episode visually. 
-    """
-    env = gym.make(ENV_NAME, render_mode="human")
-    state, info = env.reset()
+def get_state_key(state):
+    return f"{state[0]}_{state[1]}_{state[2]}_{state[3]}"
+
+print(f"🚀 Починаємо навчання на {episodes} ігор...")
+
+# --- 4. Тренування ---
+for episode in range(episodes):
+    state, _ = env.reset()
     done = False
     total_reward = 0
-    
-    print("\n🎬 Simulation Started...")
-    
-    for step in range(MAX_STEPS):
-        if qtable is None:
-            action = env.action_space.sample() # Untrained
+
+    while not done:
+        state_key = get_state_key(state)
+
+        if state_key not in q_table:
+            q_table[state_key] = np.zeros(env.action_space.n)
+
+        # Вибір дії
+        if random.uniform(0, 1) < epsilon:
+            action = env.action_space.sample()
         else:
-            action = np.argmax(qtable[state, :]) # Trained
-            
-        new_state, reward, terminated, truncated, info = env.step(action)
+            action = np.argmax(q_table[state_key])
+
+        next_state, reward, done, _, _ = env.step(action)
+        next_state_key = get_state_key(next_state)
+
+        if next_state_key not in q_table:
+            q_table[next_state_key] = np.zeros(env.action_space.n)
+
+        # Оновлення Q-значення
+        old_value = q_table[state_key][action]
+        next_max = np.max(q_table[next_state_key])
+        
+        new_value = (1 - alpha) * old_value + alpha * (reward + gamma * next_max)
+        q_table[state_key][action] = new_value
+
+        state = next_state
         total_reward += reward
-        done = terminated or truncated
-        state = new_state
-        
-        time.sleep(delay)
-        
-        if done:
-            break
-            
-    print(f"🏁 Episode finished. Total Score: {total_reward}\n")
-    env.close()
 
-def train_agent():
-    """
-    Trains the agent and tracks rewards.
-    """
-    env = gym.make(ENV_NAME, render_mode=None)
-    
-    state_size = env.observation_space.n
-    action_size = env.action_space.n
-    qtable = np.zeros((state_size, action_size))
-    
-    epsilon = EPSILON_START
-    rewards_history = []  # 📉 To store metrics
+    if epsilon > epsilon_min:
+        epsilon *= epsilon_decay
 
-    print(f"🔄 Training for {TRAIN_EPISODES} episodes...")
-    
-    for _ in tqdm(range(TRAIN_EPISODES)):
-        state, info = env.reset()
-        done = False
-        episode_reward = 0  # Track score for this specific game
-        
-        for _ in range(MAX_STEPS):
-            if random.uniform(0, 1) < epsilon:
-                action = env.action_space.sample()
-            else:
-                action = np.argmax(qtable[state, :])
+    if episode % 500 == 0:
+        print(f"Епізод {episode}: Очки = {total_reward}, Epsilon = {epsilon:.2f}")
 
-            new_state, reward, terminated, truncated, info = env.step(action)
-            
-            # Q-Learning Update
-            current_q = qtable[state, action]
-            max_future_q = np.max(qtable[new_state, :])
-            new_q = current_q + LEARNING_RATE * (reward + DISCOUNT_RATE * max_future_q - current_q)
-            qtable[state, action] = new_q
-            
-            state = new_state
-            episode_reward += reward
-            
-            if terminated or truncated:
-                break
-        
-        # End of Episode: Save metric and decay epsilon
-        rewards_history.append(episode_reward)
-        epsilon = max(EPSILON_MIN, epsilon - EPSILON_DECAY)
-        
-    env.close()
-    
-    # Save the plot now that training is done
-    save_plots(rewards_history)
-    
-    return qtable
+print("✅ Тренування завершено!")
 
-# ==========================================
-# 🚀 MAIN EXECUTION
-# ==========================================
-if __name__ == "__main__":
-    print(f"🚕 Q-Learning with Metrics ({ENV_NAME})")
-    
-    # 1. Watch Random
-    input("\n❌ Press [Enter] to watch UNTRAINED agent...")
-    watch_agent(qtable=None, delay=0.1)
-    
-    # 2. Train & Plot
-    input("💪 Press [Enter] to TRAIN and generate plots...")
-    trained_qtable = train_agent()
-    print("✅ Training Complete! Check 'training_metrics.png'.")
+# --- 5. Демонстрація ---
+print("🎮 Запускаємо результат...")
+env.close()
+env = GridWorldEnv(render_mode="human")
 
-    # 3. Watch Trained
+try:
     while True:
-        input("🏆 Press [Enter] to watch TRAINED agent...")
-        watch_agent(qtable=trained_qtable, delay=0.2)
+        state, _ = env.reset()
+        done = False
+        print("🤖 Нова гра...")
+        
+        while not done:
+            env.render()
+            state_key = get_state_key(state)
+            
+            # Тільки розумні ходи
+            if state_key in q_table:
+                action = np.argmax(q_table[state_key])
+            else:
+                action = env.action_space.sample() # Якщо раптом незнайомий стан
+            
+            state, reward, done, _, _ = env.step(action)
+            
+except KeyboardInterrupt:
+    print("Вихід...")
+finally:
+    env.close()
